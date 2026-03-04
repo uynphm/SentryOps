@@ -1,0 +1,136 @@
+name: SentryOps Security Analysis
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    # Run on every PR branch push
+  issue_comment:
+    types: [created]
+    # Allow on-demand `/sentry scan` command in PR comments
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 1 — Fast static pre-scan (always runs, <30 s target)
+  # ─────────────────────────────────────────────────────────────────────────────
+  quick-scan:
+    name: "🛡 Quick Scan — Static Analysis"
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request != null &&
+       contains(github.event.comment.body, '/sentry scan'))
+    outputs:
+      agent_signals: ${{ steps.static.outputs.agent_signals }}
+      score: ${{ steps.static.outputs.score }}
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history for diff analysis
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install scanner dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run quick-scan via SentryOps API
+        id: static
+        env:
+          SENTRYOPS_API_URL: ${{ secrets.SENTRYOPS_API_URL }}
+          SENTRYOPS_API_KEY: ${{ secrets.SENTRYOPS_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python backend/scripts/gh_quick_scan.py \
+            --repo "${{ github.repository }}" \
+            --pr "${{ github.event.pull_request.number }}" \
+            --sha "${{ github.event.pull_request.head.sha }}" \
+            --output-env "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Check Run (quick results)
+        uses: actions/github-script@v7
+        env:
+          SCORE: ${{ steps.static.outputs.score }}
+          SUMMARY: ${{ steps.static.outputs.summary }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const score = parseInt(process.env.SCORE) || 0;
+            const emoji  = score >= 80 ? '✅' : score >= 50 ? '⚠️' : '🚨';
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              name:  'SentryOps — Security Confidence Score',
+              head_sha: '${{ github.event.pull_request.head.sha }}',
+              status:   'completed',
+              conclusion: score >= 60 ? 'success' : 'failure',
+              output: {
+                title:   `${emoji} Score: ${score}/100`,
+                summary: process.env.SUMMARY || 'Quick scan complete.',
+              }
+            });
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 2 — Deep red-team scan (only if agent signals detected)
+  # ─────────────────────────────────────────────────────────────────────────────
+  deep-scan:
+    name: "🤖 Deep Scan — Shadow Agent Red-Team"
+    runs-on: ubuntu-latest
+    needs: quick-scan
+    if: needs.quick-scan.outputs.agent_signals == 'true'
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Launch Shadow Agents via SentryOps API
+        id: deep
+        env:
+          SENTRYOPS_API_URL: ${{ secrets.SENTRYOPS_API_URL }}
+          SENTRYOPS_API_KEY: ${{ secrets.SENTRYOPS_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python backend/scripts/gh_deep_scan.py \
+            --repo "${{ github.repository }}" \
+            --pr "${{ github.event.pull_request.number }}" \
+            --sha "${{ github.event.pull_request.head.sha }}" \
+            --output-env "$GITHUB_OUTPUT"
+
+      - name: Post remediation suggestions as PR review comments
+        uses: actions/github-script@v7
+        env:
+          SUGGESTIONS_JSON: ${{ steps.deep.outputs.suggestions_json }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const suggestions = JSON.parse(process.env.SUGGESTIONS_JSON || '[]');
+            for (const s of suggestions) {
+              await github.rest.pulls.createReviewComment({
+                owner:     context.repo.owner,
+                repo:      context.repo.repo,
+                pull_number: ${{ github.event.pull_request.number }},
+                commit_id: '${{ github.event.pull_request.head.sha }}',
+                path:      s.path,
+                line:      s.line,
+                body:      s.body,   // markdown suggestion block
+              });
+            }
