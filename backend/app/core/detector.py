@@ -11,6 +11,7 @@ Four detection layers:
 from __future__ import annotations
 import re
 import base64
+import binascii
 import math
 import json
 import yaml
@@ -114,8 +115,8 @@ def _decode_base64_payloads(text: str) -> list[str]:
             raw = base64.b64decode(candidate + "==").decode("utf-8", errors="ignore")
             if len(raw) > 10 and raw.isprintable():
                 decoded.append(raw)
-        except Exception:
-            pass
+        except (binascii.Error, ValueError):
+            continue
     return decoded
 
 

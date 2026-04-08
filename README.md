@@ -267,6 +267,16 @@ az containerapp create \
 | Dashboard | React + Vite |
 | Containerisation | Docker → Azure Container Apps |
 
+## 📈 Upcoming Roadmap
+
+We are continuously hardening SentryOps. Our current development focus includes:
+
+- **Real-time Agent Feedback**: Implementing WebSockets to show shadow-agent progress live in the dashboard.
+- **Key Vault Validation**: Activating the `SecretValidator` to automatically cross-reference detected secrets with Azure Key Vault (eliminating mock/false-positives).
+- **Dynamic Scenario Generation**: Using Gemini to analyze context and generate custom red-team scenarios beyond the three fixed defaults.
+- **Enhanced Static Analysis**: Deeper integration with `semgrep` and `detect-secrets` for logic-flaw detection.
+- **Comprehensive Benchmarks**: Building a "vulnerable-prompt-as-code" suite to verify detection engine recall (99%+).
+
 ---
 
 ## License

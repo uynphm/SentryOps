@@ -44,9 +44,13 @@ class AgentStatus(str, Enum):
 
 # ─── Scan Input ───────────────────────────────────────────────────────────────
 
+MAX_FILENAME_LENGTH = 512
+MAX_CONTENT_LENGTH = 500_000  # 500 KB per file
+
+
 class FileInput(BaseModel):
-    filename: str
-    content: str
+    filename: str = Field(..., max_length=MAX_FILENAME_LENGTH)
+    content: str = Field(..., max_length=MAX_CONTENT_LENGTH)
     language: str | None = None
 
 

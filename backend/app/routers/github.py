@@ -26,7 +26,7 @@ settings = get_settings()
 def _verify_signature(body: bytes, sig_header: str | None) -> None:
     """Validate GitHub webhook HMAC-SHA256 signature."""
     if not settings.github_webhook_secret:
-        return  # Skip in local dev
+        raise HTTPException(status_code=500, detail="Webhook secret not configured")
     if not sig_header or not sig_header.startswith("sha256="):
         raise HTTPException(status_code=401, detail="Missing GitHub signature")
     expected = "sha256=" + hmac.new(

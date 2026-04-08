@@ -4,6 +4,7 @@ All secrets are loaded from environment variables (never hard-coded).
 In production, inject these via Azure Container Apps secrets or a .env file.
 """
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
@@ -16,10 +17,36 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     debug: bool = False
     api_key: str = "change-me-in-production"   # Bearer token for dashboard UI
+    allowed_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
     # ── AI models ────────────────────────────────────────────────────────────
     anthropic_api_key: str = ""
     gemini_api_key: str = ""
+
+    @field_validator("anthropic_api_key")
+    @classmethod
+    def anthropic_key_required(cls, v: str, info: object) -> str:
+        # Allow empty in debug mode; enforced at runtime by orchestrator
+        if not v:
+            import os
+            if not os.getenv("DEBUG", "false").lower() in ("1", "true"):
+                raise ValueError(
+                    "ANTHROPIC_API_KEY is required in non-debug mode. "
+                    "Set it in your .env file or environment."
+                )
+        return v
+
+    @field_validator("gemini_api_key")
+    @classmethod
+    def gemini_key_required(cls, v: str, info: object) -> str:
+        if not v:
+            import os
+            if not os.getenv("DEBUG", "false").lower() in ("1", "true"):
+                raise ValueError(
+                    "GEMINI_API_KEY is required in non-debug mode. "
+                    "Set it in your .env file or environment."
+                )
+        return v
     claude_model: str = "claude-3-5-sonnet-20241022"
     gemini_model: str = "gemini-1.5-pro"
 
